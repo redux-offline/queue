@@ -1,10 +1,6 @@
 # smart-queue
 
 ## Description
-When an action comes into the queue, check if another action is pending that is the same. Such
-as "edit" or "create" and merge the data. If "edit" came in, but a "create" existed. If the
-"create" is hanging merge the edit data to the "create". If "delete", then cancel the
-"create".
 
 When an action enters de queue, check if there's another action inside the queue that targets
 the same resource, (will need to use a unique identifier). If the action exists, check the
