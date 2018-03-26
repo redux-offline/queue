@@ -2,8 +2,9 @@ import * as QueueActionTypes from './action-types';
 
 function validKey(key) {
   if (key === null) {
-    const message = "Every queue action should have a key";
+    const message = "Missing key, every queue action should have a key!";
     console.log(message);
+    return false;
   }
   return true;
 }
@@ -20,11 +21,16 @@ export function enqueue(array, item) {
     return array;
   }
 
+  index = indexOfItem(array, key);
+
   switch(method) {
     case QueueActionTypes.CREATE:
+      if (index !== -1) {
+        array[index] = {...array[index], ...item}; 
+        return array;
+      }
       return [...array, item];
     case QueueActionTypes.DELETE:
-      index = indexOfItem(array, key);
       if (index !== -1) {
         existingItem = array[index];
         if (existingItem.meta.offline.queue.method === QueueActionTypes.UPDATE ||
@@ -34,7 +40,6 @@ export function enqueue(array, item) {
       }
       return array;
     case QueueActionTypes.UPDATE:
-      index = indexOfItem(array, key);
       if (index !== -1) {
         existingItem = array[index];
         if (existingItem.meta.offline.queue.method === QueueActionTypes.CREATE) {
@@ -43,16 +48,17 @@ export function enqueue(array, item) {
       }
       return array;
     case QueueActionTypes.READ:
-      index = indexOfItem(array, key);
       if (index !== -1) {
         existingItem = array[index];
         if (existingItem.meta.offline.queue.method === QueueActionTypes.READ) {
           array[index] = {...array[index], ...item};
         }
+      } else {
+        return [...array, item];
       }
       return array;
     default:
-      console.warn('Method not defined in queue action, ignoring this action'); //TODO: improve this message
+      console.log('Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE], ignoring this actions!');
       return array
   }
 }
