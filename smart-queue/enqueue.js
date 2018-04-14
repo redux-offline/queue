@@ -1,11 +1,11 @@
 import * as QueueActionTypes from "./action-types";
 
-function validKey(key) {
+function validate(key, method) {
   if (key === null) {
-    console.log("Missing key, every queue action should have a key!");
-    return false;
+    throw 'Missing key, every queue action should have a key!';
   }
-  return true;
+  if (!QueueActionTypes[method])
+    throw 'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE]!';
 }
 
 function indexOfAction(array, key) {
@@ -13,35 +13,59 @@ function indexOfAction(array, key) {
     ({ meta: { offline: { queue = null } } }) => queue && queue.key === key
   );
 }
+
+function mergeActions(existingAction, newAction) {
+  return {
+    ...existingAction,
+    meta: {
+      ...existingAction.meta,
+      offline: {
+        ...existingAction.meta.offline,
+        effect: {
+          ...existingAction.meta.offline.effect,
+          body: newAction.meta.offline.effect.body
+        },
+        commit: {
+          ...existingAction.meta.offline.commit,
+          meta: newAction.meta.offline.commit.meta
+        },
+        rollback: {
+          ...existingAction.meta.offline.rollback,
+          meta: newAction.meta.offline.rollback.meta
+        },
+        queue: {
+          ...newAction.meta.offline.queue
+        }
+      }
+    }
+  };
+}
 export function enqueue(array, action) {
   const { meta: { offline: { queue = null } } } = action;
-  let index, existingAction;
-
+  
   if (!queue) {
     return [...array, action];
   }
+  let index, existingAction;
+  const { method = 'UNKNOWN', key = null } = queue;
 
-  const { method = "UNKNOWN", key = null } = queue;
-  if (!validKey(key)) {
-    return array;
-  }
-
+  validate(key, method);
   index = indexOfAction(array, key);
 
   switch (method) {
     case QueueActionTypes.CREATE:
       if (index !== -1) {
-        array[index] = { ...array[index], ...action };
+        console.warn('Duplicate CREATE action found, every CREATE action should have unique key!');
         return array;
       }
       return [...array, action];
     case QueueActionTypes.DELETE:
       if (index !== -1) {
         existingAction = array[index];
-        if (
+        if ( existingAction.meta.offline.queue.key === key && (
           existingAction.meta.offline.queue.method ===
             QueueActionTypes.UPDATE ||
-          existingAction.meta.offline.queue.method === QueueActionTypes.CREATE
+          existingAction.meta.offline.queue.method === QueueActionTypes.CREATE)
         ) {
           array.splice(index, 1);
         }
@@ -50,10 +74,10 @@ export function enqueue(array, action) {
     case QueueActionTypes.UPDATE:
       if (index !== -1) {
         existingAction = array[index];
-        if (
+        if ( existingAction.meta.offline.queue.key === key &&
           existingAction.meta.offline.queue.method === QueueActionTypes.CREATE
         ) {
-          array[index] = { ...array[index], ...action };
+          array[index] = mergeActions(array[index], action);
         }
       }
       return array;
@@ -63,16 +87,11 @@ export function enqueue(array, action) {
         if (
           existingAction.meta.offline.queue.method === QueueActionTypes.READ
         ) {
-          array[index] = { ...array[index], ...action };
+          array[index] = mergeActions(array[index], action);
         }
       } else {
         return [...array, action];
       }
-      return array;
-    default:
-      console.log(
-        'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE], ignoring this actions!'
-      );
       return array;
   }
 }

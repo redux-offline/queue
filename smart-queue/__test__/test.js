@@ -4,57 +4,61 @@ import * as QueueActionTypes from "../action-types";
 let queue = [];
 let createQueueAction = {
   type: "CREATE",
-  meta: { offline: { queue: { method: QueueActionTypes.CREATE, key: "1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.CREATE, key: "1" } } }
 };
 let createQueueAction2 = {
   type: "CREATE2",
-  meta: { offline: { queue: { method: QueueActionTypes.CREATE, key: "2" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.CREATE, key: "2" } } }
 };
 let createQueueAction3 = {
   type: "CREATE3",
-  meta: { offline: { queue: { method: QueueActionTypes.CREATE, key: "3" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.CREATE, key: "3" } } }
 };
 let updateQueueAction = {
   type: "UPDATE",
-  meta: { offline: { queue: { method: QueueActionTypes.UPDATE, key: "1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.UPDATE, key: "1" } } }
 };
 let updateQueueAction2 = {
   type: "UPDATE2",
-  meta: { offline: { queue: { method: QueueActionTypes.UPDATE, key: "2" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.UPDATE, key: "2" } } }
 };
 let updateNonExistingQueueAction = {
   type: "Non-Existing",
-  meta: { offline: { queue: { method: QueueActionTypes.UPDATE, key: "-1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.UPDATE, key: "-1" } } }
 };
 let deleteQueueAction = {
   type: "DELETE",
-  meta: { offline: { queue: { method: QueueActionTypes.DELETE, key: "1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.DELETE, key: "1" } } }
 };
 let deleteQueueAction2 = {
   type: "DELETE2",
-  meta: { offline: { queue: { method: QueueActionTypes.DELETE, key: "2" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.DELETE, key: "2" } } }
 };
 let deleteNonExistingQueueAction = {
   type: "NON-Existing",
-  meta: { offline: { queue: { method: QueueActionTypes.DELETE, key: "-1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.DELETE, key: "-1" } } }
 };
 let readQueueAction = {
   type: "READ",
-  meta: { offline: { queue: { method: QueueActionTypes.READ, key: "1" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.READ, key: "1" } } }
 };
 let readQueueAction2 = {
   type: "READ2",
-  meta: { offline: { queue: { method: QueueActionTypes.READ, key: "2" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.READ, key: "2" } } }
 };
 let missingActionMethod = {
   type: "MISSING-METHOD",
-  meta: { offline: { queue: { method: null, key: "2" } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: null, key: "2" } } }
 };
 let missingActionKey = {
   type: "MISSING-KEY",
-  meta: { offline: { queue: { method: QueueActionTypes.CREATE, key: null } } }
+  meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.CREATE, key: null } } }
 };
 let valinaAction = { type: "VANILA_ACTION", meta: { offline: {} } };
+
+beforeAll(() => {
+  global.console = {warn: jest.fn()};
+});
 
 beforeEach(() => {
   queue = [];
@@ -70,7 +74,7 @@ test("Create then update same item", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, updateQueueAction);
   expect(queue.length).toBe(1);
-  expect(Q.peek(queue).type).toBe("UPDATE");
+  expect(Q.peek(queue).meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
 });
 
 test("Create then update then delete same item", () => {
@@ -89,13 +93,16 @@ test("Insert -> update then read", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, updateQueueAction);
   expect(Q.peek(queue).meta.offline.queue.key).toBe("1");
-  expect(Q.peek(queue).type).toBe("UPDATE");
+  expect(Q.peek(queue).type).toBe("CREATE");
+  expect(Q.peek(queue).meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
 });
 
 test("Multiple create with same key", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction);
+  expect(console.warn).toBeCalled()
   queue = Q.enqueue(queue, createQueueAction);
+  expect(console.warn).toBeCalled()
   expect(queue.length).toBe(1);
 });
 
@@ -115,6 +122,7 @@ test("Multiple create with same key followed by delete", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction);
+  expect(console.warn).toBeCalled();
   const item = Q.peek(queue);
   expect(item.type).toBe("CREATE");
   expect(queue.length).toBe(1);
@@ -148,9 +156,11 @@ test("2 creates followed by update of first item", () => {
   queue = Q.enqueue(queue, updateQueueAction);
   const firstItem = Q.peek(queue);
   queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
-  expect(firstItem.type).toBe("UPDATE");
-  expect(thirdItem.type).toBe("CREATE2");
+  const secondItem = Q.peek(queue);
+  expect(firstItem.type).toBe("CREATE");
+  expect(firstItem.meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
+  expect(secondItem.type).toBe("CREATE2");
+  expect(secondItem.meta.offline.queue.method).toBe(QueueActionTypes.CREATE);
 });
 
 test("2 creates followed by update of second item", () => {
@@ -159,9 +169,11 @@ test("2 creates followed by update of second item", () => {
   queue = Q.enqueue(queue, updateQueueAction2);
   const firstItem = Q.peek(queue);
   queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
+  const secondItem = Q.peek(queue);
   expect(firstItem.type).toBe("CREATE");
-  expect(thirdItem.type).toBe("UPDATE2");
+  expect(firstItem.meta.offline.queue.method).toBe(QueueActionTypes.CREATE);
+  expect(secondItem.type).toBe("CREATE2");
+  expect(secondItem.meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
 });
 
 test("2 reads", () => {
@@ -199,25 +211,17 @@ test("Update non-existing queue actions", () => {
 test("Missing action method", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, missingActionMethod);
-  expect(queue.length).toBe(2);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
-  expect(firstItem.type).toBe("CREATE");
-  expect(thirdItem.type).toBe("CREATE2");
+  expect(() => {
+    queue = Q.enqueue(queue, missingActionMethod);
+  }).toThrow();
 });
 
 test("Missing action key", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, missingActionKey);
-  expect(queue.length).toBe(2);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
-  expect(firstItem.type).toBe("CREATE");
-  expect(thirdItem.type).toBe("CREATE2");
+  expect(() => {
+    queue = Q.enqueue(queue, missingActionKey);
+  }).toThrow();
 });
 
 test("add valina action to queue", () => {
@@ -240,6 +244,7 @@ test("Valina action with duplicate Smart-queue action to queue", () => {
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction);
   expect(queue.length).toBe(3);
+  expect(console.warn).toBeCalled();;
 });
 
 test("Valina action and duplicate Smart-queue action reading from queue", () => {
@@ -247,6 +252,7 @@ test("Valina action and duplicate Smart-queue action reading from queue", () => 
   queue = Q.enqueue(queue, valinaAction);
   queue = Q.enqueue(queue, createQueueAction);
   queue = Q.enqueue(queue, createQueueAction);
+  expect(console.warn).toBeCalled();
   expect(queue.length).toBe(3);
   let item = Q.peek(queue);
   queue = Q.dequeue(queue);
