@@ -54,7 +54,9 @@ let missingActionKey = {
   type: "MISSING-KEY",
   meta: { offline: { effect: {body: {}}, commit: {meta: {}}, rollback: {meta: {}}, queue: { method: QueueActionTypes.CREATE, key: null } } }
 };
-let valinaAction = { type: "VANILA_ACTION", meta: { offline: {} } };
+let vanilaAction = { type: "VANILA_ACTION", meta: { offline: {} } };
+
+var state = {};
 
 beforeAll(() => {
   global.console = {warn: jest.fn()};
@@ -62,101 +64,138 @@ beforeAll(() => {
 
 beforeEach(() => {
   queue = [];
+  state = {
+    lastTransaction: 0,
+    busy: false,
+    outbox: []
+  }
 });
+
+function simulateEnqueue(action) {
+  if (action.meta && action.meta.offline) {
+    const transaction = state.lastTransaction + 1;
+    const stamped = {
+      ...action,
+      meta: { ...action.meta, transaction }
+    };
+    const { outbox, ...offline } = state;
+    state = {
+      ...state,
+      lastTransaction: transaction,
+      outbox: Q.enqueue(outbox, stamped, { offline })
+    };
+  }
+}
+
+function simulatePeek() {
+  return Q.peek(state.outbox, null, { offline: state.offline });
+}
+
+function simulateDequeue() {
+  state.outbox = Q.dequeue(state.outbox, null, { offline: state.offline });
+}
+
+function send() {
+  state.busy = true;
+}
+
+function sendComplete() {
+  state.busy = false;
+}
 // create single item
 test("Single insertion test", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  expect(queue.length).toBe(1);
+  simulateEnqueue(createQueueAction);
+  expect(state.outbox.length).toBe(1);
 });
 
 // create then update same item
 test("Create then update same item", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, updateQueueAction);
-  expect(queue.length).toBe(1);
-  expect(Q.peek(queue).meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(updateQueueAction);
+  expect(state.outbox.length).toBe(1);
+  expect(Q.peek(state.outbox).meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
 });
 
 test("Create then update then delete same item", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, updateQueueAction);
-  queue = Q.enqueue(queue, deleteQueueAction);
-  expect(queue.length).toBe(0);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(updateQueueAction);
+  simulateEnqueue(deleteQueueAction);
+  expect(state.outbox.length).toBe(0);
 });
 
 test("Insert then read", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  expect(Q.peek(queue).meta.offline.queue.key).toBe("1");
+  simulateEnqueue(createQueueAction);
+  expect(Q.peek(state.outbox).meta.offline.queue.key).toBe("1");
 });
 
 test("Insert -> update then read", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, updateQueueAction);
-  expect(Q.peek(queue).meta.offline.queue.key).toBe("1");
-  expect(Q.peek(queue).type).toBe("CREATE");
-  expect(Q.peek(queue).meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(updateQueueAction);
+  expect(simulatePeek().meta.offline.queue.key).toBe("1");
+  expect(simulatePeek().type).toBe("CREATE");
+  expect(simulatePeek().meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
 });
 
 test("Multiple create with same key", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction);
   expect(console.warn).toBeCalled()
-  queue = Q.enqueue(queue, createQueueAction);
+  simulateEnqueue(createQueueAction);
   expect(console.warn).toBeCalled()
-  expect(queue.length).toBe(1);
+  expect(state.outbox.length).toBe(1);
 });
 
 test("Multiple create with different keys", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, createQueueAction3);
-  expect(queue.length).toBe(3);
-  expect(Q.peek(queue).type).toBe("CREATE");
-  queue = Q.dequeue(queue);
-  expect(Q.peek(queue).type).toBe("CREATE2");
-  queue = Q.dequeue(queue);
-  expect(Q.peek(queue).type).toBe("CREATE3");
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(createQueueAction3);
+  expect(state.outbox.length).toBe(3);
+  expect(simulatePeek().type).toBe("CREATE");
+  simulateDequeue();
+  expect(simulatePeek().type).toBe("CREATE2");
+  simulateDequeue();
+  expect(simulatePeek().type).toBe("CREATE3");
 });
 
 test("Multiple create with same key followed by delete", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction);
   expect(console.warn).toBeCalled();
-  const item = Q.peek(queue);
+  const item = simulatePeek();
   expect(item.type).toBe("CREATE");
-  expect(queue.length).toBe(1);
-  queue = Q.enqueue(queue, deleteQueueAction);
-  expect(queue.length).toBe(0);
+  expect(state.outbox.length).toBe(1);
+  queue = simulateEnqueue(deleteQueueAction);
+  expect(state.outbox.length).toBe(0);
 });
 
 test("Multiple create with different key followed by delete", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, createQueueAction3);
-  queue = Q.enqueue(queue, deleteQueueAction2);
-  expect(queue.length).toBe(2);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(createQueueAction3);
+  simulateEnqueue(deleteQueueAction2);
+  expect(state.outbox.length).toBe(2);
 });
 
 test("Multiple create with different key followed by delete and 2 peek", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, createQueueAction3);
-  queue = Q.enqueue(queue, deleteQueueAction2);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(createQueueAction3);
+  simulateEnqueue(deleteQueueAction2);
+  const firstItem = simulatePeek();
+  simulateDequeue();
+  const thirdItem = simulatePeek();
   expect(firstItem.type).toBe("CREATE");
   expect(thirdItem.type).toBe("CREATE3");
 });
 
 test("2 creates followed by update of first item", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, updateQueueAction);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const secondItem = Q.peek(queue);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateQueueAction);
+  const firstItem = simulatePeek();
+  simulateDequeue();
+  const secondItem = simulatePeek();
   expect(firstItem.type).toBe("CREATE");
   expect(firstItem.meta.offline.queue.method).toBe(QueueActionTypes.UPDATE);
   expect(secondItem.type).toBe("CREATE2");
@@ -164,12 +203,12 @@ test("2 creates followed by update of first item", () => {
 });
 
 test("2 creates followed by update of second item", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, updateQueueAction2);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const secondItem = Q.peek(queue);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateQueueAction2);
+  const firstItem = simulatePeek();
+  simulateDequeue()
+  const secondItem = simulatePeek();
   expect(firstItem.type).toBe("CREATE");
   expect(firstItem.meta.offline.queue.method).toBe(QueueActionTypes.CREATE);
   expect(secondItem.type).toBe("CREATE2");
@@ -177,90 +216,154 @@ test("2 creates followed by update of second item", () => {
 });
 
 test("2 reads", () => {
-  queue = Q.enqueue(queue, readQueueAction);
-  queue = Q.enqueue(queue, readQueueAction2);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
+  simulateEnqueue(readQueueAction);
+  simulateEnqueue(readQueueAction2);
+  const firstItem = simulatePeek();
+  queue = simulateDequeue();
+  const thirdItem = simulatePeek();
   expect(firstItem.type).toBe("READ");
   expect(thirdItem.type).toBe("READ2");
 });
 
 test("Delete non-existing queue actions", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, deleteNonExistingQueueAction);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(deleteNonExistingQueueAction);
+  const firstItem = simulatePeek();
+  simulateDequeue();
+  const thirdItem = simulatePeek();
   expect(firstItem.type).toBe("CREATE");
   expect(thirdItem.type).toBe("CREATE2");
 });
 
 test("Update non-existing queue actions", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  queue = Q.enqueue(queue, updateNonExistingQueueAction);
-  const firstItem = Q.peek(queue);
-  queue = Q.dequeue(queue);
-  const thirdItem = Q.peek(queue);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateNonExistingQueueAction);
+  const firstItem = simulatePeek();
+  simulateDequeue();
+  const thirdItem = simulatePeek();
   expect(firstItem.type).toBe("CREATE");
   expect(thirdItem.type).toBe("CREATE2");
 });
 
 test("Missing action method", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
   expect(() => {
-    queue = Q.enqueue(queue, missingActionMethod);
+    simulateEnqueue(missingActionMethod);
   }).toThrow();
 });
 
 test("Missing action key", () => {
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
   expect(() => {
-    queue = Q.enqueue(queue, missingActionKey);
+    simulateEnqueue(missingActionKey);
   }).toThrow();
 });
 
 test("add valina action to queue", () => {
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, valinaAction);
-  expect(queue.length).toBe(2);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(vanilaAction);
+  expect(state.outbox.length).toBe(2);
 });
 
 test("Valina action with Smart-queue action to queue", () => {
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction2);
-  expect(queue.length).toBe(4);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction2);
+  expect(state.outbox.length).toBe(4);
 });
 
 test("Valina action with duplicate Smart-queue action to queue", () => {
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction);
-  expect(queue.length).toBe(3);
-  expect(console.warn).toBeCalled();;
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction);
+  expect(state.outbox.length).toBe(3);
+  expect(console.warn).toBeCalled();
 });
 
 test("Valina action and duplicate Smart-queue action reading from queue", () => {
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, valinaAction);
-  queue = Q.enqueue(queue, createQueueAction);
-  queue = Q.enqueue(queue, createQueueAction);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(vanilaAction);
+  simulateEnqueue(createQueueAction);
+  simulateEnqueue(createQueueAction);
   expect(console.warn).toBeCalled();
-  expect(queue.length).toBe(3);
-  let item = Q.peek(queue);
-  queue = Q.dequeue(queue);
+  expect(state.outbox.length).toBe(3);
+  let item = simulatePeek();
+  simulateDequeue();
   expect(item.type).toBe("VANILA_ACTION");
-  item = Q.peek(queue);
-  queue = Q.dequeue(queue);
+  item = simulatePeek();
+  simulateDequeue();
   expect(item.type).toBe("VANILA_ACTION");
-  item = Q.peek(queue);
-  queue = Q.dequeue(queue);
+  item = simulatePeek();
+  simulateDequeue();
   expect(item.type).toBe("CREATE");
+});
+
+test("update currently processing action", () => {
+  simulateEnqueue(createQueueAction);
+  send();
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateQueueAction);
+  sendComplete();
+  let firstItem = simulatePeek();
+  simulateDequeue();
+  let secondItem = simulatePeek();
+  expect(firstItem.type).toBe('CREATE');
+  expect(secondItem.type).toBe('CREATE2');
+});
+
+test("delete currently processing action", () => {
+  simulateEnqueue(createQueueAction);
+  send();
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(deleteQueueAction);
+  sendComplete();
+  let firstItem = simulatePeek();
+  simulateDequeue();
+  let secondItem = simulatePeek();
+  expect(firstItem.type).toBe('CREATE');
+  expect(secondItem.type).toBe('CREATE2');
+});
+
+test("update non-processing action", () => {
+  simulateEnqueue(createQueueAction);
+  send();
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateQueueAction2);
+  sendComplete();
+  let firstItem = simulatePeek();
+  simulateDequeue();
+  let secondItem = simulatePeek();
+  expect(firstItem.type).toBe('CREATE');
+  expect(secondItem.type).toBe('CREATE2');
+});
+
+test("delete non-processing action", () => {
+  simulateEnqueue(createQueueAction);
+  send();
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(deleteQueueAction2);
+  sendComplete();
+  let firstItem = simulatePeek();
+  expect(state.outbox.length).toBe(1);
+  simulateDequeue();
+  expect(state.outbox.length).toBe(0);
+});
+
+test("update then delete non-processing action", () => {
+  simulateEnqueue(createQueueAction);
+  send();
+  simulateEnqueue(createQueueAction2);
+  simulateEnqueue(updateQueueAction2);
+  simulateEnqueue(deleteQueueAction2);
+  sendComplete();
+  let firstItem = simulatePeek();
+  expect(state.outbox.length).toBe(1);
+  simulateDequeue();
+  expect(state.outbox.length).toBe(0);
 });

@@ -1,11 +1,9 @@
-import * as QueueActionTypes from "./action-types";
+import { CREATE, UPDATE, DELETE, READ } from "./action-types";
 
 function validate(key, method) {
   if (key === null) {
     throw 'Missing key, every queue action should have a key!';
   }
-  if (!QueueActionTypes[method])
-    throw 'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE]!';
 }
 
 function indexOfAction(array, key) {
@@ -14,84 +12,72 @@ function indexOfAction(array, key) {
   );
 }
 
-function mergeActions(existingAction, newAction) {
+function mergeActions(queueAction, newAction) {
   return {
-    ...existingAction,
+    ...queueAction,
     meta: {
-      ...existingAction.meta,
+      ...queueAction.meta,
       offline: {
-        ...existingAction.meta.offline,
-        effect: {
-          ...existingAction.meta.offline.effect,
-          body: newAction.meta.offline.effect.body
-        },
-        commit: {
-          ...existingAction.meta.offline.commit,
-          meta: newAction.meta.offline.commit.meta
-        },
-        rollback: {
-          ...existingAction.meta.offline.rollback,
-          meta: newAction.meta.offline.rollback.meta
-        },
-        queue: {
-          ...newAction.meta.offline.queue
-        }
+        ...newAction.meta.offline
       }
     }
   };
 }
-export function enqueue(array, action) {
+
+function safeToProceed(index, context) {
+  return !context.offline.busy || index !== 0;
+}
+
+export function enqueue(array, action, context) {
   const { meta: { offline: { queue = null } } } = action;
   
   if (!queue) {
     return [...array, action];
   }
-  let index, existingAction;
+  let index, queueAction;
   const { method = 'UNKNOWN', key = null } = queue;
 
-  validate(key, method);
+  validate(key);
   index = indexOfAction(array, key);
 
   switch (method) {
-    case QueueActionTypes.CREATE:
+    case CREATE:
       if (index !== -1) {
         console.warn('Duplicate CREATE action found, every CREATE action should have unique key!');
         return array;
       }
       return [...array, action];
-    case QueueActionTypes.DELETE:
+    case DELETE:
       if (index !== -1) {
-        existingAction = array[index];
-        if ( existingAction.meta.offline.queue.key === key && (
-          existingAction.meta.offline.queue.method ===
-            QueueActionTypes.UPDATE ||
-          existingAction.meta.offline.queue.method === QueueActionTypes.CREATE)
-        ) {
+        queueAction = array[index];
+        if (safeToProceed(index, context) &&
+          (queueAction.meta.offline.queue.method === UPDATE
+          || queueAction.meta.offline.queue.method === CREATE)) {
           array.splice(index, 1);
         }
       }
       return array;
-    case QueueActionTypes.UPDATE:
+    case UPDATE:
       if (index !== -1) {
-        existingAction = array[index];
-        if ( existingAction.meta.offline.queue.key === key &&
-          existingAction.meta.offline.queue.method === QueueActionTypes.CREATE
-        ) {
+        queueAction = array[index];
+        if (safeToProceed(index, context) &&
+          queueAction.meta.offline.queue.method === CREATE) {
           array[index] = mergeActions(array[index], action);
         }
       }
       return array;
-    case QueueActionTypes.READ:
+    case READ:
       if (index !== -1) {
-        existingAction = array[index];
-        if (
-          existingAction.meta.offline.queue.method === QueueActionTypes.READ
-        ) {
+        queueAction = array[index];
+        if (safeToProceed(index, context) &&
+          queueAction.meta.offline.queue.method === READ) {
           array[index] = mergeActions(array[index], action);
         }
       } else {
         return [...array, action];
       }
       return array;
+    default:
+      throw 'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE]!';
   }
 }
