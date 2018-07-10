@@ -1,14 +1,18 @@
-import { CREATE, UPDATE, DELETE, READ } from "./action-types";
+import { CREATE, UPDATE, DELETE, READ } from './action-types';
 
-function validate(key, method) {
+function validate(key) {
   if (key === null) {
-    throw 'Missing key, every queue action should have a key!';
+    throw new Error('Missing key, every queue action should have a key!');
   }
 }
 
 function indexOfAction(array, key) {
   return array.findIndex(
-    ({ meta: { offline: { queue = null } } }) => queue && queue.key === key
+    ({
+      meta: {
+        offline: { queue = null }
+      }
+    }) => queue && queue.key === key
   );
 }
 
@@ -29,55 +33,72 @@ function safeToProceed(index, context) {
 }
 
 export function enqueue(array, action, context) {
-  const { meta: { offline: { queue = null } } } = action;
-  
+  const outbox = array;
+  let queueAction;
+  const {
+    meta: {
+      offline: { queue = null }
+    }
+  } = action;
+
   if (!queue) {
-    return [...array, action];
+    return [...outbox, action];
   }
-  let index, queueAction;
+
   const { method = 'UNKNOWN', key = null } = queue;
 
   validate(key);
-  index = indexOfAction(array, key);
+  const index = indexOfAction(outbox, key);
 
   switch (method) {
     case CREATE:
       if (index !== -1) {
-        console.warn('Duplicate CREATE action found, every CREATE action should have unique key!');
-        return array;
+        // eslint-disable-next-line no-console
+        console.warn(
+          'Duplicate CREATE action found, every CREATE action should have unique key!'
+        );
+        return outbox;
       }
-      return [...array, action];
+      return [...outbox, action];
     case DELETE:
       if (index !== -1) {
-        queueAction = array[index];
-        if (safeToProceed(index, context) &&
-          (queueAction.meta.offline.queue.method === UPDATE
-          || queueAction.meta.offline.queue.method === CREATE)) {
-          array.splice(index, 1);
+        queueAction = outbox[index];
+        if (
+          safeToProceed(index, context) &&
+          (queueAction.meta.offline.queue.method === UPDATE ||
+            queueAction.meta.offline.queue.method === CREATE)
+        ) {
+          outbox.splice(index, 1);
         }
       }
-      return array;
+      return outbox;
     case UPDATE:
       if (index !== -1) {
-        queueAction = array[index];
-        if (safeToProceed(index, context) &&
-          queueAction.meta.offline.queue.method === CREATE) {
-          array[index] = mergeActions(array[index], action);
+        queueAction = outbox[index];
+        if (
+          safeToProceed(index, context) &&
+          queueAction.meta.offline.queue.method === CREATE
+        ) {
+          outbox[index] = mergeActions(outbox[index], action);
         }
       }
-      return array;
+      return outbox;
     case READ:
       if (index !== -1) {
-        queueAction = array[index];
-        if (safeToProceed(index, context) &&
-          queueAction.meta.offline.queue.method === READ) {
-          array[index] = mergeActions(array[index], action);
+        queueAction = outbox[index];
+        if (
+          safeToProceed(index, context) &&
+          queueAction.meta.offline.queue.method === READ
+        ) {
+          outbox[index] = mergeActions(outbox[index], action);
         }
       } else {
-        return [...array, action];
+        return [...outbox, action];
       }
-      return array;
+      return outbox;
     default:
-      throw 'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE]!';
+      throw new Error(
+        'Missing method definition, the "method" value should be either of [CREATE, READ, DELETE, UPDATE]!'
+      );
   }
 }
