@@ -1,7 +1,8 @@
 {
   "presets": [
     "env",
-    "stage-3"
+    "stage-3",
+    "flow"
   ],
   "plugins": [
     ["transform-class-properties", { "spec": true }],
